@@ -6,7 +6,7 @@
 
 ;Designed for 16F628 @20Mhz
 ;***************************************************************
-LIST   P=PIC16F628A
+LIST P=PIC16F628A
 #include	<P16F628A.inc>
 
 
@@ -23,6 +23,7 @@ LIST   P=PIC16F628A
 ;v1.0 - Started Changing Brightness code
 ;v1.1 - Fixed Legacy Test Code Bits, fixed some XOR Checksum Bugs
 ;v1.2 - Rewrote..... EVERYTHING, well almost, changed dimming routine to main loop. Timed main loop to 164 clocks. 255 levels of phase control.
+;v1.3 - Fixed a few minor timing bugs, cleaned comments
 
 
 
@@ -649,7 +650,7 @@ CHANNEL_7_TRIGGER; ------------------*** 8 Clocks  ***--------------------------
 CHANNEL_7_TURN_ON
 	bsf		PORTB,7; Turn On Channel 7 Output pin + 1 clock (=5)
 	bsf		CHANNEL_TRIGGERS,7; Notifies that Channel 7 Has been activated this loop, check no further + 1 clock (=6)
-	goto	WRAP_UP_TIMER; Proceed to Finish Loop..				   + 2 clock (=8)
+	goto	WRAP_UP_TIMER; Proceed to Finish Loop..					+ 2 clock (=8)
 
 CHANNEL_7_TURN_OFF
 	bcf		PORTB,7; Turn Off Channel 7 Output pin (=6)
@@ -666,7 +667,7 @@ CHANNEL_7_DELAY
 
 FINISH_TIMER_LOOP
 
-WRAP_UP_TIMER; ------------------*** 25 Clocks; Either by Continuing or Wrapping up  ***------------------------------
+WRAP_UP_TIMER; ------------------*** 25 Clocks Wrapping up, OR 9 Clocks Continuing ***------------------------------
 	movf	TIMER_LOOP_COUNTDOWN,0; Moves TIMER_LOOP_COUNTDOWN to W				+ 1 clock (=1) 
 	xorlw	b'00000001' ; XOR byte and w, w will be zero if TIMER_LOOP_COUNTDOWN is 0x01	+ 1 clock (=2)
 	btfss	STATUS, Z ; Skip if zero flag is set, AKA execute next line if Timer should stop	+ 2 clocks IF TIMER WILL END (=4) + 1 clock IF TIMER WILL NOT (=3)
@@ -827,7 +828,7 @@ RECEIVE_CHANNEL_0
 	bsf		BYTE_TRIGGERS,0; Notify that this channel's byte has been received			+ 1 clock (=6)
 	call	Delay_TenClocks_20MHz;											+ 10 clocks (=16)
 	call	Delay_TenClocks_20MHz;											+ 10 clocks (=26)
-	call	Delay_FourClocks_20MHz;											+ 10 clocks (=30)
+	call	Delay_FourClocks_20MHz;											+  4 clocks (=30)
 
 	goto	WRAP_UP_RECEIVE;								+ 2 clocks (=32)
 
@@ -897,13 +898,14 @@ RECEIVE_CHANNEL_5
 	btfsc	BYTE_TRIGGERS,5; If BIT is SET, skip to apply next byte, else proceed to buffer byte 	+ 1 clock IF BYTE 1 has been triggered (=16),	+ 2 clocks IF BYTE 8 has NOT been triggered (=17)
 	goto	RECEIVE_CHANNEL_6; 								+ 2 clocks IF BYTE 5 has been triggered (=18)
 
-	movf	BYTE_BUFFER,0; Moves Buffered byte to W							+ 1 clock (=19)
-	movwf	CHANNEL_5_BUFFER; Moves buffered byte to assosiated register	+ 1 clock (=20)
-	xorwf	BYTE_CHECKSUM,1;Xor byte with BYTE_CHECKSUM						+ 1 clock (=21)
+	movf	BYTE_BUFFER,0; Moves Buffered byte to W							+ 1 clock (=18)
+	movwf	CHANNEL_5_BUFFER; Moves buffered byte to assosiated register	+ 1 clock (=29)
+	xorwf	BYTE_CHECKSUM,1;Xor byte with BYTE_CHECKSUM						+ 1 clock (=20)
 
-	bsf		BYTE_TRIGGERS,5; Notify that this channel's byte has been received			+ 1 clock (=22)
-	call	Delay_FourClocks_20MHz;											+ 4 clocks (=26)
-	call	Delay_FourClocks_20MHz;											+ 4 clocks (=30)
+	bsf		BYTE_TRIGGERS,5; Notify that this channel's byte has been received			+ 1 clock (=21)
+	call	Delay_FourClocks_20MHz;											+ 4 clocks (=25)
+	call	Delay_FourClocks_20MHz;											+ 4 clocks (=29)
+	nop		;																+ 1 clock  (=30)
 
 	goto	WRAP_UP_RECEIVE;								+ 2 clocks (=32)
 
@@ -941,31 +943,31 @@ RECEIVE_CHANNEL_8
 	btfsc	BYTE_TRIGGERS_2,0; If BIT is SET, skip to apply next byte, else proceed to buffer byte 	+ 1 clock IF BYTE 8 has been triggered (=25),	+ 2 clocks IF BYTE 8 has NOT been triggered (=26) 
 	goto	RECEIVE_CHANNEL_9; 								+ 2 clocks IF BYTE 8 has been triggered (=27)
 
-	movf	BYTE_BUFFER,0; Moves Buffered byte to W,		+ 1 clock (=27) 
-	xorwf	BYTE_CHECKSUM,1;Xor byte with BYTE_CHECKSUM,	+ 1 clock (=28) 
+	movf	BYTE_BUFFER,0; Moves Buffered byte to W,						+ 1 clock (=27) 
+	xorwf	BYTE_CHECKSUM,1;Xor byte with BYTE_CHECKSUM,					+ 1 clock (=28) 
 
 	bsf		BYTE_TRIGGERS_2,0; Notify that this channel's byte has been received,		+ 1 clock (=29) 
-	nop		;												+ 1 clock (=30) 
-	goto	WRAP_UP_RECEIVE;								+ 2 clocks (=32) 
+	nop		;																+ 1 clock (=30) 
+	goto	WRAP_UP_RECEIVE;												+ 2 clocks (=32) 
 
 
 RECEIVE_CHANNEL_9
 	btfsc	BYTE_TRIGGERS_2,1; If BIT is SET, skip to apply next byte, else proceed to buffer byte 	+ 1 clock IF BYTE 1 has been triggered (=28),	+ 2 clocks IF BYTE 8 has NOT been triggered (=29)
 	goto	WRAP_UP_DELAY; 								+ 2 clocks IF BYTE 9 has been triggered (=30)
 
-	movf	BYTE_BUFFER,0; Moves Buffered byte to W			+ 1 clock (=30)
-	xorwf	BYTE_CHECKSUM,1;Xor byte with BYTE_CHECKSUM		+ 1 clock (=31)
+	movf	BYTE_BUFFER,0; Moves Buffered byte to W							+ 1 clock (=30)
+	xorwf	BYTE_CHECKSUM,1;Xor byte with BYTE_CHECKSUM						+ 1 clock (=31)
 
 	bsf		BYTE_TRIGGERS_2,1; Notify that this channel's byte has been received		+ 1 clock (=32)
 
 
 WRAP_UP_RECEIVE
-	incf	BYTE_COUNT,1;Increment BYTE_COUNT				+ 1 clock (=33)
-	return;													+ 2 clock (=35)
+	incf	BYTE_COUNT,1;Increment BYTE_COUNT								+ 1 clock (=33)
+	return;																	+ 2 clock (=35)
 
 
 WRAP_UP_DELAY; Delays execution to make 35 clocks
-	goto	WRAP_UP_RECEIVE; 								+ 2 clocks(=32)
+	goto	WRAP_UP_RECEIVE; 												+ 2 clocks(=32)
 
 
 
