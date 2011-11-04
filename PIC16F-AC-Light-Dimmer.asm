@@ -24,7 +24,7 @@ LIST P=PIC16F628A
 ;v1.1 - Fixed Legacy Test Code Bits, fixed some XOR Checksum Bugs
 ;v1.2 - Rewrote..... EVERYTHING, well almost, changed dimming routine to main loop. Timed main loop to 164 clocks. 255 levels of phase control.
 ;v1.3 - Fixed a few minor timing bugs, cleaned comments
-
+;v1.4 - Increasing UART Baud Rate from 9600 to 19200
 
 
 ; Configuration Bits
@@ -376,7 +376,7 @@ org	0x00FF
 	bsf		PIE1,0; Enables TIMER 1 Interrupt
 
 	;---Configure SPBRG for desired baud rate
-	MOVLW D'129'; We will use 9600
+	MOVLW D'64'; We will use 19200
 	MOVWF SPBRG ;baud at 20MHz
 
 
