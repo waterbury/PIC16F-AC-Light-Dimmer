@@ -1,0 +1,28 @@
+(C) 2011 Theodore Wahrburg
+ email: ted.wahrburg (At) gmail (dot) com
+All software and associated hardware comes with no warranty. USE AT YOUR OWN RISK. Free for all non-commercial use. Plese provide proper credit if code is used in future project.
+
+
+PIC16F628 --
+Communicate with UART @ 19200 Baud 8,1,Null 
+
+
+The UART Protocol to control light dimming is composed of 12 bytes. 
+A start byte, 10 bytes for channels, and an end byte which is an xor'ed checksum of the previous 10 channels. 
+It is to be noted that regardless if the PIC device supports 10 channels, 10 channels must be provided in protocol.
+A Start Byte is composed of the value of '1', and it is reserved for use as a Start Byte; The only other exception is as a checksum value, where it is allowed.
+Else, if '1' is used as a Channel Value, it will force the PIC to interpret the byte as a Start Byte. This is to allow a quick correction in the event of a UART error.
+
+-- Protocol Breakdown --
+Byte 01: Start Byte; Use '1'
+Byte 02: Channel 01; Use Value from 0 to 255 to specify intensity. (do not use start byte value of '1')
+Byte 03: Channel 02; Use Value from 0 to 255 to specify intensity. (do not use start byte value of '1')
+Byte 04: Channel 03; Use Value from 0 to 255 to specify intensity. (do not use start byte value of '1')
+Byte 05: Channel 04; Use Value from 0 to 255 to specify intensity. (do not use start byte value of '1')
+Byte 06: Channel 05; Use Value from 0 to 255 to specify intensity. (do not use start byte value of '1')
+Byte 07: Channel 06; Use Value from 0 to 255 to specify intensity. (do not use start byte value of '1')
+Byte 08: Channel 07; Use Value from 0 to 255 to specify intensity. (do not use start byte value of '1')
+Byte 09: Channel 08; Use Value from 0 to 255 to specify intensity. (do not use start byte value of '1')
+Byte 10: Channel 09; Use Value from 0 to 255 to specify intensity. (do not use start byte value of '1')
+Byte 11: Channel 10; Use Value from 0 to 255 to specify intensity. (do not use start byte value of '1')
+Byte 12: Checksum; Determinded by xor'ing Channels 01 to 10.
