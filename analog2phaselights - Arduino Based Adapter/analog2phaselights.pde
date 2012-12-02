@@ -10,9 +10,14 @@ int strobePin = 2; // strobe is attached to digital pin 2
 int resetPin = 3; // reset is attached to digital pin 3
 int spectrumValue[7]; // to hold a2d values
 
+int disablePin = 7; //pin to send 0s to output
+
 void setup() 
 {
   Serial.begin(19200);
+    
+  pinMode(disablePin, INPUT); 
+  digitalWrite(disablePin, HIGH); //Turn on pull up resistors
 
   pinMode(analogPin, INPUT);
   pinMode(strobePin, OUTPUT);
@@ -54,9 +59,13 @@ void loop()
  
   
 
-   
-  outputToLights(spectrumValue[0], spectrumValue[1], spectrumValue[2], spectrumValue[3], spectrumValue[4], spectrumValue[5], spectrumValue[6], 0);
-   
+  if (digitalRead(disablePin == HIGH)) //continue if board is enabled
+    outputToLights(spectrumValue[0], spectrumValue[1], spectrumValue[2], spectrumValue[3], spectrumValue[4], spectrumValue[5], spectrumValue[6], 0);
+  else //Else send 0s
+  {
+    outputToLights(0,0,0,0, 0,0,0,0);
+    delay(5000); //delay 5 seconds
+  }
 /* //Test stuff  
   if (i == 255){
    i = 0; 
