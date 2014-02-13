@@ -1,0 +1,15 @@
+C:\Storage\Documents\Projects\Source Code\Visual Basic\AC Light Dimming\AC Light Dimming Test App\AC Light Dimming Test App\bin\Release\AC Light Dimming Test App.exe.manifest
+C:\Storage\Documents\Projects\Source Code\Visual Basic\AC Light Dimming\AC Light Dimming Test App\AC Light Dimming Test App\bin\Release\AC Light Dimming Test App.application
+C:\Storage\Documents\Projects\Source Code\Visual Basic\AC Light Dimming\AC Light Dimming Test App\AC Light Dimming Test App\bin\Release\AC Light Dimming Test App.exe
+C:\Storage\Documents\Projects\Source Code\Visual Basic\AC Light Dimming\AC Light Dimming Test App\AC Light Dimming Test App\bin\Release\AC Light Dimming Test App.pdb
+C:\Storage\Documents\Projects\Source Code\Visual Basic\AC Light Dimming\AC Light Dimming Test App\AC Light Dimming Test App\bin\Release\AC Light Dimming Test App.xml
+C:\Storage\Documents\Projects\Source Code\Visual Basic\AC Light Dimming\AC Light Dimming Test App\AC Light Dimming Test App\obj\x86\Release\ResolveAssemblyReference.cache
+C:\Storage\Documents\Projects\Source Code\Visual Basic\AC Light Dimming\AC Light Dimming Test App\AC Light Dimming Test App\obj\x86\Release\WindowsApplication1.AC_Test_App_Form.resources
+C:\Storage\Documents\Projects\Source Code\Visual Basic\AC Light Dimming\AC Light Dimming Test App\AC Light Dimming Test App\obj\x86\Release\WindowsApplication1.Resources.resources
+C:\Storage\Documents\Projects\Source Code\Visual Basic\AC Light Dimming\AC Light Dimming Test App\AC Light Dimming Test App\obj\x86\Release\GenerateResource.read.1.tlog
+C:\Storage\Documents\Projects\Source Code\Visual Basic\AC Light Dimming\AC Light Dimming Test App\AC Light Dimming Test App\obj\x86\Release\GenerateResource.write.1.tlog
+C:\Storage\Documents\Projects\Source Code\Visual Basic\AC Light Dimming\AC Light Dimming Test App\AC Light Dimming Test App\obj\x86\Release\AC Light Dimming Test App.exe.manifest
+C:\Storage\Documents\Projects\Source Code\Visual Basic\AC Light Dimming\AC Light Dimming Test App\AC Light Dimming Test App\obj\x86\Release\AC Light Dimming Test App.application
+C:\Storage\Documents\Projects\Source Code\Visual Basic\AC Light Dimming\AC Light Dimming Test App\AC Light Dimming Test App\obj\x86\Release\AC Light Dimming Test App.exe
+C:\Storage\Documents\Projects\Source Code\Visual Basic\AC Light Dimming\AC Light Dimming Test App\AC Light Dimming Test App\obj\x86\Release\AC Light Dimming Test App.xml
+C:\Storage\Documents\Projects\Source Code\Visual Basic\AC Light Dimming\AC Light Dimming Test App\AC Light Dimming Test App\obj\x86\Release\AC Light Dimming Test App.pdb
