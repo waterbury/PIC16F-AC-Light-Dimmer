@@ -29,3 +29,8 @@ Byte 09: Channel 08; Use Value from 0 to 255 to specify intensity. (do not use s
 Byte 10: Channel 09; Use Value from 0 to 255 to specify intensity. (do not use start byte value of '1')
 Byte 11: Channel 10; Use Value from 0 to 255 to specify intensity. (do not use start byte value of '1')
 Byte 12: Checksum; Determinded by xor'ing Channels 01 to 10.
+
+
+Raspberry Pi Pico 2 W --
+A MicroPython port of the dimmer is in "Raspberry Pi Pico 2 W - MicroPython". It accepts the same serial protocol,
+supports 50 Hz and 60 Hz mains, and fixes the flash of the lights at power-up. See its README.md for wiring.
