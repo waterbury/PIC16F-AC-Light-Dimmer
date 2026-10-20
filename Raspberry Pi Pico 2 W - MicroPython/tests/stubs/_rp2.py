@@ -1,5 +1,5 @@
 # Host stand-in for MicroPython's _rp2: a StateMachine that runs the handful of
-# PIO instructions acdimmer uses, one call to step() per PIO clock.
+# PIO instructions acdimmer uses (OSR shifting right), one call to step() per PIO clock.
 import machine
 
 
@@ -11,13 +11,15 @@ class PIO:
     JOIN_NONE = 0
     JOIN_TX = 1
     JOIN_RX = 2
+    SHIFT_LEFT = 0
+    SHIFT_RIGHT = 1
 
 
 MACHINES = {}
 
 
 class StateMachine:
-    def __init__(self, id, prog, freq, *, in_base, set_base):
+    def __init__(self, id, prog, freq, *, in_base, out_base):
         assert id not in MACHINES, "state machine %d used twice" % id
         MACHINES[id] = self
         self.id = id
@@ -27,7 +29,8 @@ class StateMachine:
         self.wrap_top = (execctrl >> 12) & 0x1F
         self.freq = freq
         self.in_pin = in_base.id
-        self.set_pin = set_base.id
+        self.out_pin = out_base.id
+        assert prog[4] >> 19 & 1, "programs here shift OSR right"
         self.fifo = []
         self.x = self.y = self.isr = 0
         self.osr = 0
@@ -82,6 +85,16 @@ class StateMachine:
                 return  # stall
             else:
                 self.osr = self.x
+        elif op == 3:  # out
+            dest, n = (w >> 5) & 7, (w & 0x1F) or 32
+            v = self.osr & ((1 << n) - 1)
+            self.osr >>= n
+            if dest == 0:
+                machine.LEVELS[self.out_pin] = v & 1
+            elif dest == 2:
+                self.y = v
+            else:
+                raise NotImplementedError(hex(w))
         elif op == 5:  # mov
             dest, src = (w >> 5) & 7, w & 7
             assert (w >> 3) & 3 == 0
@@ -96,9 +109,7 @@ class StateMachine:
                 raise NotImplementedError(hex(w))
         elif op == 7:  # set
             dest, data = (w >> 5) & 7, w & 0x1F
-            if dest == 0:
-                machine.LEVELS[self.set_pin] = data & 1
-            elif dest == 1:
+            if dest == 1:
                 self.x = data
             elif dest == 2:
                 self.y = data

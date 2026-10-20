@@ -7,15 +7,19 @@
 # How it works
 # ------------
 # The PIC version counted 250 software steps of 32.8 us after each zero-cross
-# (plus a fixed 521 us offset) and turned each channel on when its step came up.
-# Here every channel gets its own PIO state machine running at 1 MHz, so the
-# timing is done in hardware with 1 us resolution and no jitter from Python,
-# Wi-Fi or garbage collection:
+# (plus a fixed 521 us offset), turned each channel on when its step came up
+# and held it on until the next zero crossing. This port does the same, but
+# every channel gets its own PIO state machine running at 1 MHz, so the timing
+# is done in hardware with 1 us resolution and no jitter from Python, Wi-Fi or
+# garbage collection. Each half-cycle the state machine waits for the
+# zero-cross edge and then makes two timed changes to its output:
 #
-#   zero-cross edge --(delay for this channel)--> gate pulse --> wait for next edge
+#   fires mid half-cycle:   edge --> release at zero crossing --> fire (held over the edge)
+#   fires late (wrapped):   edge --> fire --> release at zero crossing
 #
-# Python only has to work out each channel's delay when its level changes.
-# A zero-cross pin interrupt hands new delays to the state machines once per
+# Level 255 holds the output on continuously and level 0 holds it off.
+# Python only has to work out each channel's timings when its level changes.
+# A zero-cross pin interrupt hands new timings to the state machines once per
 # half-cycle (so the newest value always wins) and measures the mains period.
 #
 # Boot flash
@@ -39,89 +43,92 @@ RISING = const(1)
 FALLING = const(0)
 
 _SM_FREQ = const(1_000_000)  # 1 PIO instruction = 1 us
-_FIRE_OVERHEAD_US = const(4)  # PIO cycles between the edge and the gate going high
-_PULSE_OVERHEAD_US = const(3)  # PIO cycles of the pulse not spent in the loop
+_STEP_OVERHEAD_US = const(3)  # PIO cycles per output change not spent in the delay loop
 _EDGE_GUARD_US = const(50)  # state machine must be waiting again this long before the next edge
+_DELAY_BITS = const(14)
 
 # Plausible zero-cross intervals (one edge per half-cycle, 40-80 Hz mains)
 _MIN_HALF_US = const(6250)
 _MAX_HALF_US = const(12500)
 
 
-# Gate a triac once per half-cycle.
-#   x   = delay after the zero-cross edge, in us (0 = channel off)
-#   isr = gate pulse length, in us (loaded once at start-up)
-@rp2.asm_pio(set_init=rp2.PIO.OUT_LOW)
-def _fire_on_rising():
+# Each half-cycle, after the zero-cross edge: wait a, drive the output to v1,
+# wait b, drive it to v2. x holds the schedule, LSB first: a:14 v1:1 b:14 v2:1
+# (30 bits, so it stays a small int in the interrupt handler).
+@rp2.asm_pio(out_init=rp2.PIO.OUT_LOW, out_shiftdir=rp2.PIO.SHIFT_RIGHT)
+def _gate_on_rising():
     wrap_target()
-    label("top")
-    pull(noblock)  # take a new delay if one was queued, otherwise keep x
+    pull(noblock)  # take a new schedule if one was queued, otherwise reuse x
     mov(x, osr)
     wait(0, pin, 0)
     wait(1, pin, 0)  # zero-cross edge
-    jmp(not_x, "top")  # level 0: stay off
-    mov(y, x)
-    label("delay")
-    jmp(y_dec, "delay")
-    set(pins, 1)
-    mov(y, isr)
-    label("pulse")
-    jmp(y_dec, "pulse")
-    set(pins, 0)
+    out(y, 14)
+    label("wait_a")
+    jmp(y_dec, "wait_a")
+    out(pins, 1)
+    out(y, 14)
+    label("wait_b")
+    jmp(y_dec, "wait_b")
+    out(pins, 1)
     wrap()
 
 
-@rp2.asm_pio(set_init=rp2.PIO.OUT_LOW)
-def _fire_on_falling():
+@rp2.asm_pio(out_init=rp2.PIO.OUT_LOW, out_shiftdir=rp2.PIO.SHIFT_RIGHT)
+def _gate_on_falling():
     wrap_target()
-    label("top")
     pull(noblock)
     mov(x, osr)
     wait(1, pin, 0)
     wait(0, pin, 0)  # zero-cross edge
-    jmp(not_x, "top")
-    mov(y, x)
-    label("delay")
-    jmp(y_dec, "delay")
-    set(pins, 1)
-    mov(y, isr)
-    label("pulse")
-    jmp(y_dec, "pulse")
-    set(pins, 0)
+    out(y, 14)
+    label("wait_a")
+    jmp(y_dec, "wait_a")
+    out(pins, 1)
+    out(y, 14)
+    label("wait_b")
+    jmp(y_dec, "wait_b")
+    out(pins, 1)
     wrap()
 
 
-def fire_delay_us(level, half_us, offset_us, pulse_us, end_margin_us):
-    """Delay from the zero-cross edge to the gate pulse for a 0-255 level.
+def gate_times(level, half_us, offset_us, end_margin_us):
+    """(on_us, off_us) after the zero-cross edge for a level of 1-254.
 
-    Returns 0 for "off". Level 255 fires right at the true zero crossing
-    (edge + offset), level 1 fires end_margin_us + pulse_us before the next one.
+    The output goes high when the channel fires and stays high until the next
+    true zero crossing (edge + offset), as the PIC did. Level 254 fires just
+    after the zero crossing, level 1 end_margin_us before the next one.
     """
-    if level <= 0:
-        return 0
-    if level > 255:
-        level = 255
-    window = half_us - pulse_us - end_margin_us
+    window = half_us - end_margin_us
     if window < 0:
         window = 0
     t = (255 - level) * window // 254  # time after the true zero crossing
-    # The offset can push the firing point past the next edge (or before this
-    # one); mains repeats every half-cycle, so firing that far after the
-    # previous edge is the same moment.
-    d = (offset_us + t) % half_us
-    # The pulse has to finish before the next edge or the state machine would
-    # miss it and skip a half-cycle, so fire a touch earlier instead.
-    limit = half_us - pulse_us - _EDGE_GUARD_US
-    if d > limit:
-        d = limit if limit > 0 else 0
-    return d + 1  # never 0, which means "off"
+    # The offset can push either point past the next edge (or before this
+    # one); mains repeats every half-cycle, so that far after the previous
+    # edge is the same moment.
+    on = (offset_us + t) % half_us
+    off = offset_us % half_us
+    # Both changes must be made before the next edge or the state machine
+    # would miss it and skip a half-cycle.
+    limit = half_us - _EDGE_GUARD_US
+    return (on if on < limit else limit), (off if off < limit else limit)
 
 
-def _sm_value(delay_us):
-    if delay_us == 0:
-        return 0
-    v = delay_us - _FIRE_OVERHEAD_US
-    return v if v > 0 else 1
+def schedule_word(level, half_us, offset_us, end_margin_us):
+    """The 30-bit schedule a channel's state machine runs every half-cycle."""
+    if level <= 0:
+        return 0  # low, low
+    if level >= 255:
+        return 1 << _DELAY_BITS | 1 << (2 * _DELAY_BITS + 1)  # high, high
+    on, off = gate_times(level, half_us, offset_us, end_margin_us)
+    if on < off:
+        first, v1, second, v2 = on, 1, off, 0
+    else:
+        first, v1, second, v2 = off, 0, on, 1
+    a = first - _STEP_OVERHEAD_US
+    b = second - first - _STEP_OVERHEAD_US
+    a = a if a > 0 else 0
+    b = b if b > 0 else 0
+    return a | v1 << _DELAY_BITS | b << (_DELAY_BITS + 1) | v2 << (2 * _DELAY_BITS + 1)
 
 
 class Dimmer:
@@ -134,7 +141,6 @@ class Dimmer:
                    negative if the detector edge comes late. The PIC board used 521.
     zc_edge        RISING or FALLING: the detector edge that marks a zero crossing
     zc_pull        None, Pin.PULL_UP or Pin.PULL_DOWN for the zero-cross input
-    gate_pulse_us  how long each gate pulse lasts
     end_margin_us  keep the dimmest setting this far clear of the next zero crossing
     sm_ids         PIO state machines to use, one per channel (see README for Wi-Fi)
     """
@@ -148,7 +154,6 @@ class Dimmer:
         zc_offset_us=0,
         zc_edge=RISING,
         zc_pull=None,
-        gate_pulse_us=200,
         end_margin_us=200,
         sm_ids=None,
     ):
@@ -162,12 +167,9 @@ class Dimmer:
             raise ValueError("too many channels for the available state machines")
         if mains_hz not in (None, 50, 60):
             raise ValueError("mains_hz must be 50, 60 or None (auto)")
-        if gate_pulse_us < _PULSE_OVERHEAD_US + 1:
-            raise ValueError("gate_pulse_us too short")
 
         self._n = n
         self._offset = zc_offset_us
-        self._pulse = gate_pulse_us
         self._margin = end_margin_us
         self._levels = bytearray(n)
         self._pending = [-1] * n  # values waiting for the next zero-cross
@@ -177,15 +179,12 @@ class Dimmer:
         self._edges = 0
 
         self._zc = Pin(zc_pin, Pin.IN, zc_pull)
-        prog = _fire_on_rising if zc_edge == RISING else _fire_on_falling
+        prog = _gate_on_rising if zc_edge == RISING else _gate_on_falling
         self._sms = []
         for i in range(n):
             sm = rp2.StateMachine(
-                sm_ids[i], prog, freq=_SM_FREQ, in_base=self._zc, set_base=self._outs[i]
+                sm_ids[i], prog, freq=_SM_FREQ, in_base=self._zc, out_base=self._outs[i]
             )
-            sm.put(gate_pulse_us - _PULSE_OVERHEAD_US)
-            sm.exec("pull()")
-            sm.exec("mov(isr, osr)")
             sm.exec("set(x, 0)")  # start off, whatever was left in x
             self._sms.append(sm)
         for sm in self._sms:
@@ -213,9 +212,7 @@ class Dimmer:
         """Set one channel, 0 (off) to 255 (full)."""
         level = 0 if level < 0 else 255 if level > 255 else int(level)
         self._levels[channel] = level
-        self._pending[channel] = _sm_value(
-            fire_delay_us(level, self._half, self._offset, self._pulse, self._margin)
-        )
+        self._pending[channel] = schedule_word(level, self._half, self._offset, self._margin)
 
     def set_percent(self, channel, percent):
         self.set(channel, round(percent * 255 / 100))

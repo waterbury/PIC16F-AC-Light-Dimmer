@@ -46,16 +46,20 @@ Other constructor options:
 | --- | --- | --- |
 | `zc_edge` | `RISING` | Which edge of the detector output marks a zero crossing. Use `FALLING` for a detector that idles high and pulses low (e.g. an optocoupler with a pull-up). |
 | `zc_pull` | `None` | `Pin.PULL_UP` or `Pin.PULL_DOWN` on the zero-cross input. |
-| `gate_pulse_us` | `200` | Length of each gate pulse. Make it longer if LED strings flicker at low levels. |
-| `end_margin_us` | `200` | The dimmest level fires at least this long (plus the pulse) before the next zero crossing. |
+| `end_margin_us` | `200` | The dimmest level (1) fires this long before the next zero crossing. |
 | `sm_ids` | PIO0, then PIO2, then PIO1 | Which PIO state machines to use, one per channel (up to 12). |
 
 ### Zero-cross offset
 
 `zc_offset_us` is the time from the detector's edge to the real zero crossing. Most
 optocoupler detectors switch a little before the crossing, so the offset is positive;
-if yours switches after it, use a negative number. If the dimmest levels flicker or
-full brightness is not quite full, adjust it in steps of about 50 us.
+if yours switches after it, use a negative number.
+
+Each output is released at the zero crossing the offset points to, so the offset
+matters. If it is too large, the gate is still on as the next half-cycle starts and the
+triac fires again straight away: dim levels look too bright or flicker. Lower the offset
+in steps of about 50 us until they don't. Releasing slightly before the real crossing is
+harmless, because the triac stays latched until the current reaches zero.
 
 ### 50 Hz and 60 Hz
 
@@ -68,14 +72,14 @@ half-wave detector raises an error.
 ## How it differs from the PIC
 
 The PIC counted 250 steps of 32.8 us in a hand-timed loop after each zero crossing.
-Here each channel has its own PIO state machine running at 1 MHz: it waits for the
-zero-cross edge, waits that channel's delay, then sends one gate pulse. Timing is done
-in hardware to 1 us, so Wi-Fi, garbage collection or slow Python code cannot make the
+Here each channel has its own PIO state machine running at 1 MHz that does the same job
+in hardware, to 1 us, so Wi-Fi, garbage collection or slow Python code cannot make the
 lights flicker. If the Python program crashes, the lights stay at their last levels.
 
-The PIC held each output high from the moment it fired until the next half-cycle; this
-port sends a short pulse instead, which is all a triac needs and means an output never
-stays on across a zero crossing.
+The gate behaves like the PIC's: once a channel fires, its output stays high until the
+next zero crossing, and level 255 holds the output high continuously. The PIC released
+the gate on the first step after the next edge plus 521 us; this port releases it
+exactly at edge + `zc_offset_us`.
 
 ## The power-up flash
 
@@ -164,4 +168,4 @@ python3 -m unittest discover tests
 
 The tests assemble the PIO programs with MicroPython's assembler (`tests/stubs/rp2.py`)
 and run them on a simulated state machine against a simulated 50 Hz or 60 Hz
-zero-cross signal, checking when each gate pulse starts and how long it lasts.
+zero-cross signal, checking when each output turns on, when it is released and that 255 stays on.

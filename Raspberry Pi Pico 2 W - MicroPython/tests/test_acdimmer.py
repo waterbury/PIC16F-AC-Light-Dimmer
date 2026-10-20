@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 import _rp2  # noqa: E402
 import machine  # noqa: E402
 import acdimmer  # noqa: E402
-from acdimmer import Dimmer, PacketDecoder, fire_delay_us  # noqa: E402
+from acdimmer import Dimmer, PacketDecoder, gate_times  # noqa: E402
 
 ZC = 2
 OUTS = (6, 7, 8, 9, 10, 11, 12, 13)
@@ -36,7 +36,8 @@ class World:
         self.pulse_end = None
         self.edges = []
         self.gate_on = {p: [] for p in OUTS}
-        self.violations = []
+        self.gate_off = {p: [] for p in OUTS}
+        self.high_us = {p: 0 for p in OUTS}
         machine.LEVELS.clear()
         machine.PINS.clear()
         _rp2.MACHINES.clear()
@@ -65,40 +66,43 @@ class World:
             for sm in _rp2.MACHINES.values():
                 sm.step()
             for p in OUTS:
-                if machine.LEVELS.get(p, 0) and not before[p]:
+                level = machine.LEVELS.get(p, 0)
+                self.high_us[p] += level
+                if level and not before[p]:
                     self.gate_on[p].append(self.now)
+                elif before[p] and not level:
+                    self.gate_off[p].append(self.now)
 
-    def delays(self, pin):
-        """Gate-on time after the most recent zero-cross edge, for each firing."""
+    def since_edge(self, times):
+        """Each time, measured from the most recent zero-cross edge."""
         out = []
-        for t in self.gate_on[pin]:
+        for t in times:
             prev = [e for e in self.edges if e <= t]
             out.append(t - prev[-1])
         return out
 
 
-class FireDelayTest(unittest.TestCase):
-    def test_off_full_and_order(self):
-        args = (8333, 0, 200, 200)
-        self.assertEqual(fire_delay_us(0, *args), 0)
-        self.assertEqual(fire_delay_us(255, *args), 1)
-        delays = [fire_delay_us(lv, *args) for lv in range(1, 256)]
-        self.assertEqual(delays, sorted(delays, reverse=True))
-        self.assertEqual(delays[0], 8333 - 200 - 200 + 1)
+class GateTimesTest(unittest.TestCase):
+    def test_no_offset(self):
+        # Fires later as the level drops, always released at the zero crossing.
+        times = [gate_times(lv, 8333, 0, 200) for lv in range(1, 255)]
+        ons = [on for on, off in times]
+        self.assertEqual(ons, sorted(ons, reverse=True))
+        self.assertEqual(ons[0], 8333 - 200)
+        self.assertLess(ons[-1], 40)
+        self.assertEqual({off for on, off in times}, {0})
 
-    def test_offset_wraps_past_next_edge(self):
+    def test_pic_offset_wraps_past_next_edge(self):
         # Edge comes 521 us before the true zero crossing (the PIC board).
-        d = fire_delay_us(1, 8333, 521, 200, 200)
-        self.assertLess(d + 200 + 50, 8333)
-        # Dim enough that edge + offset + t lands in the next half-cycle.
-        t = (255 - 4) * (8333 - 400) // 254
-        self.assertEqual(fire_delay_us(4, 8333, 521, 200, 200), (521 + t) % 8333 + 1)
-        # Just short of that the pulse would run into the next edge: fire a little earlier.
-        self.assertEqual(fire_delay_us(10, 8333, 521, 200, 200), 8333 - 200 - 50 + 1)
+        t = (255 - 4) * (8333 - 200) // 254
+        self.assertEqual(gate_times(4, 8333, 521, 200), ((521 + t) % 8333, 521))
+        self.assertEqual(gate_times(128, 8333, 521, 200)[1], 521)
+        # Just short of wrapping, the change would land on the next edge: make it a little earlier.
+        self.assertEqual(gate_times(12, 8333, 521, 200)[0], 8333 - 50)
 
     def test_negative_offset(self):
-        # Edge comes 300 us after the true zero crossing: fire 300 us before the next edge.
-        self.assertEqual(fire_delay_us(255, 10000, -300, 200, 200), 9701)
+        # Edge comes 300 us after the true zero crossing.
+        self.assertEqual(gate_times(254, 10000, -300, 200), (9700 + 38, 9700))
 
 
 class DimmerTimingTest(unittest.TestCase):
@@ -109,18 +113,31 @@ class DimmerTimingTest(unittest.TestCase):
         half = 10_000 if hz == 50 else 8_333
         self.assertEqual(d.mains_hz, hz)
         d.set_levels(levels)
-        world.run(half * 10)
+        world.run(half * 6)
+        for p in OUTS:
+            world.gate_on[p].clear()
+            world.gate_off[p].clear()
+            world.high_us[p] = 0
+        world.run(half * 4)
         for pin, lv in zip(OUTS, levels):
-            want = fire_delay_us(lv, half, offset, 200, 200)
-            got = world.delays(pin)[-4:]
-            if want == 0:
-                self.assertEqual(world.gate_on[pin], [], "channel at 0 fired")
+            if lv == 0:
+                self.assertEqual(world.high_us[pin], 0, "channel at 0 turned on")
                 continue
-            self.assertEqual(len(got), 4, "level %d did not fire every half-cycle" % lv)
-            # The state machine can't fire sooner than a few us after the edge.
-            want = max(want, 5)
-            for g in got:
-                self.assertLessEqual(abs(g - want), 3, (lv, got, want))
+            if lv == 255:
+                self.assertEqual(world.high_us[pin], half * 4, "255 not held on")
+                continue
+            on, off = gate_times(lv, half, offset, 200)
+            ons = world.since_edge(world.gate_on[pin])
+            offs = world.since_edge(world.gate_off[pin])
+            self.assertEqual(len(ons), 4, "level %d did not fire every half-cycle" % lv)
+            self.assertEqual(len(offs), 4, "level %d was not released every half-cycle" % lv)
+            for g in ons:
+                self.assertLessEqual(abs(g - max(on, 3)), 3, (lv, ons, on))
+            for g in offs:
+                self.assertLessEqual(abs(g - max(off, 3)), 3, (lv, offs, off))
+            # Held from firing until the zero crossing.
+            held = (off - on) % half
+            self.assertLessEqual(abs(world.high_us[pin] / 4 - held), 4, (lv, world.high_us[pin], held))
         return world, d
 
     def test_60hz(self):
@@ -130,27 +147,16 @@ class DimmerTimingTest(unittest.TestCase):
         self.check(50, 50, 0, (0, 1, 30, 64, 128, 200, 254, 255))
 
     def test_auto_detects_50hz(self):
-        self.check(50, None, 521, (0, 5, 10, 64, 128, 200, 254, 255))
+        self.check(50, None, 521, (0, 4, 12, 64, 128, 200, 254, 255))
 
     def test_auto_detects_60hz_with_pic_offset(self):
-        self.check(60, None, 521, (0, 5, 10, 64, 128, 200, 254, 255))
+        self.check(60, None, 521, (0, 4, 12, 64, 128, 200, 254, 255))
+
+    def test_negative_offset(self):
+        self.check(60, 60, -300, (0, 1, 30, 64, 128, 200, 254, 255))
 
     def test_falling_edge_detector(self):
-        self.check(60, 60, 0, (0, 1, 30, 64, 128, 200, 254, 255), rising=False)
-
-    def test_gate_pulse_length(self):
-        world = World(60)
-        d = Dimmer(ZC, OUTS[:1], mains_hz=60, gate_pulse_us=150)
-        d[0] = 128
-        world.run(8333)
-        world.gate_on[OUTS[0]].clear()
-        high = 0
-        for _ in range(8333 * 4):
-            world.run(1)
-            high += machine.LEVELS[OUTS[0]]
-        pulses = len(world.gate_on[OUTS[0]])
-        self.assertEqual(pulses, 4)
-        self.assertLessEqual(abs(high / pulses - 150), 2)
+        self.check(60, 60, 521, (0, 1, 30, 64, 128, 200, 254, 255), rising=False)
 
     def test_latest_value_wins(self):
         world = World(60)
@@ -159,8 +165,17 @@ class DimmerTimingTest(unittest.TestCase):
             d[0] = lv  # far faster than mains; must not overflow the FIFO
         d[0] = 128
         world.run(8333 * 4)
-        want = fire_delay_us(128, 8333, 0, 200, 200)
-        self.assertLessEqual(abs(world.delays(OUTS[0])[-1] - want), 3)
+        on, off = gate_times(128, 8333, 0, 200)
+        self.assertLessEqual(abs(world.since_edge(world.gate_on[OUTS[0]])[-1] - on), 3)
+
+    def test_level_changes_cleanly(self):
+        # Switching between levels either side of the wrap never leaves a channel stuck on.
+        world = World(60)
+        d = Dimmer(ZC, OUTS[:1], mains_hz=60, zc_offset_us=521)
+        for lv in (4, 200, 4, 0, 255, 0):
+            d[0] = lv
+            world.run(8333 * 3)
+        self.assertEqual(machine.LEVELS[OUTS[0]], 0)
 
 
 class BootStateTest(unittest.TestCase):
